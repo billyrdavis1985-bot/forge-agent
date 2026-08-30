@@ -1,0 +1,14 @@
+[Unit]
+Description=Run Forge Agent research session every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:00:00
+RandomizedDelaySec=300
+
+# Deliberately FALSE. Missed runs are not caught up: the task frontier is
+# queue-driven, so a skipped window costs nothing, whereas a catch-up storm
+# after downtime would fire several sessions at once against the same memory.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

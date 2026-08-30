@@ -1,0 +1,21 @@
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+
+# --- runtime ---
+.run.lock
+.env
+
+# --- MEMORY REPO (kept separate from this code repo) ---
+memory/*
+!memory/.gitkeep
+!memory/findings/
+memory/findings/*
+!memory/findings/.gitkeep
+
+# runtime artifacts
+runs/*
+!runs/.gitkeep
+scratch/*
+!scratch/.gitkeep

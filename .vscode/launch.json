@@ -1,0 +1,44 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Agent: run session (auto-pick task)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "src.orchestrator",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Agent: run session (prompt for instruction)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "src.orchestrator",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "args": ["${input:instruction}"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Agent: status (no API call)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "src.orchestrator",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "args": ["--status"],
+      "console": "integratedTerminal"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "instruction",
+      "type": "promptString",
+      "description": "Task instruction for this session",
+      "default": "Summarize the current program state into findings/program_overview.md"
+    }
+  ]
+}

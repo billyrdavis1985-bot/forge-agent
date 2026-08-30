@@ -1,0 +1,25 @@
+# Forge Agent — configuration
+# Single source of truth for model routing and safety caps.
+
+model: claude-sonnet-4-6        # main research loop. swap to opus for synthesis runs.
+fallback_model: claude-haiku-4-5-20251001   # used if the primary is unavailable
+
+# --- Safety caps ---
+max_turns: 25                  # ceiling on agent-loop iterations per session
+max_budget_usd: 0.50           # per-session spend kill-switch (enforced by SDK)
+daily_budget_usd: 2.00         # per-UTC-day ceiling across ALL runs (enforced by ledger)
+
+# Tools the agent may invoke. No WebSearch/WebFetch yet — Phase 2 adds those
+# behind a read-only subagent so fetched content cannot trigger writes.
+allowed_tools:
+  - Read
+  - Glob
+  - Grep
+  - Edit
+  - Write
+  - Bash
+
+# Directories the agent may write into. Anything outside is denied at the gate.
+write_roots:
+  - memory
+  - scratch

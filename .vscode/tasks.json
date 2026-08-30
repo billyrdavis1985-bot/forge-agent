@@ -1,0 +1,48 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Setup: create venv + install deps",
+      "type": "shell",
+      "command": "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Agent: status",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python -m src.orchestrator --status",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Memory: show run history",
+      "type": "shell",
+      "command": "git log --oneline -15",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Memory: what did the last run change?",
+      "type": "shell",
+      "command": "git show HEAD --stat && echo '---' && git show HEAD",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Memory: revert last run (DESTRUCTIVE - confirm sha first)",
+      "type": "shell",
+      "command": "git log --oneline -3 && echo && read -p 'Revert HEAD? (y/N) ' a && [ \"$a\" = y ] && git revert --no-edit HEAD || echo 'aborted'",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Tail latest transcript",
+      "type": "shell",
+      "command": "tail -f \"$(ls -t runs/*.log | head -1)\"",
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    }
+  ]
+}

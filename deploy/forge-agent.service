@@ -1,0 +1,35 @@
+[Unit]
+Description=Forge Agent research session (one bounded run)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+WorkingDirectory=/opt/forge-agent
+
+# systemd does NOT inherit your login shell PATH. Set it explicitly or the
+# Claude Code CLI will not be found and preflight will fail with exit 2.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/opt/forge-agent/.venv/bin
+Environment=HOME=/home/forge
+
+# Secrets live in a root-owned 0600 file, never in the unit.
+EnvironmentFile=/etc/forge-agent/env
+
+ExecStart=/opt/forge-agent/run.sh
+
+# Never let a wedged session run forever.
+TimeoutStartSec=1800
+Restart=no
+
+# Exit 3 = deliberate skip (daily budget reached). Not a failure.
+SuccessExitStatus=0 3
+
+# Light hardening.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/forge-agent
+
+[Install]
+WantedBy=multi-user.target
