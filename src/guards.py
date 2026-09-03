@@ -54,63 +54,90 @@ def _is_within(child: Path, parents: list[Path]) -> bool:
     return any(child == p or p in child.parents for p in parents)
 
 
+def _decide(tool_name: str, input_data: dict, project_root: Path,
+            allowed: list[Path]) -> tuple[bool, str]:
+    """Pure policy decision. Returns (allow, reason).
+
+    This is the single source of truth for the guard policy. Both the
+    can_use_tool callback and the PreToolUse hook call it, so the two paths
+    can never drift apart.
+    """
+    # --- Bash gating ----------------------------------------------------
+    if tool_name == "Bash":
+        command = input_data.get("command", "") or ""
+        for pattern in _BASH_DENY:
+            if re.search(pattern, command):
+                return False, f"Destructive command blocked (matched: {pattern})."
+        if _TRUNCATE_APPEND_ONLY.search(command):
+            return False, ("That would truncate an append-only file. "
+                           "Use '>>' to append, never '>'.")
+        return True, ""
+
+    # --- Non-write tools pass through -----------------------------------
+    if tool_name not in _WRITE_TOOLS:
+        return True, ""
+
+    # --- Write containment ----------------------------------------------
+    target = next((input_data[f] for f in _PATH_FIELDS if input_data.get(f)), None)
+    if target is None:
+        return False, "Write tool called without a resolvable file path."
+
+    resolved = _resolve(target, project_root)
+    if not _is_within(resolved, allowed):
+        return False, (f"Write to {resolved} denied. Writes are restricted to: "
+                       f"{', '.join(str(a) for a in allowed)}.")
+
+    # --- Append-only enforcement ----------------------------------------
+    if resolved.name in _APPEND_ONLY:
+        return False, (f"{resolved.name} is append-only and cannot be edited in "
+                       f"place. Append with bash instead: "
+                       f"printf '%s\\n' \"<entry>\" >> {resolved}")
+
+    return True, ""
+
+
 def make_gate(project_root: Path, write_roots: list[str]):
-    """Build the can_use_tool callback bound to this project's write policy."""
+    """Build the can_use_tool callback (defense-in-depth; may be shadowed by a
+    bare allowedTools entry, which is why the PreToolUse hook below is the real
+    enforcement path)."""
     allowed = [(project_root / r).resolve() for r in write_roots]
 
     async def gate(tool_name: str, input_data: dict, context) -> object:
-        # --- Bash gating ------------------------------------------------
-        if tool_name == "Bash":
-            command = input_data.get("command", "") or ""
-            for pattern in _BASH_DENY:
-                if re.search(pattern, command):
-                    return PermissionResultDeny(
-                        message=f"Destructive command blocked (matched: {pattern}).",
-                        interrupt=False,
-                    )
-            if _TRUNCATE_APPEND_ONLY.search(command):
-                return PermissionResultDeny(
-                    message=(
-                        "That would truncate an append-only file. "
-                        "Use '>>' to append, never '>'."
-                    ),
-                    interrupt=False,
-                )
+        allow, reason = _decide(tool_name, input_data, project_root, allowed)
+        if allow:
             return PermissionResultAllow(updated_input=input_data)
-
-        # --- Non-write tools pass through -------------------------------
-        if tool_name not in _WRITE_TOOLS:
-            return PermissionResultAllow(updated_input=input_data)
-
-        # --- Write containment ------------------------------------------
-        target = next((input_data[f] for f in _PATH_FIELDS if input_data.get(f)), None)
-        if target is None:
-            return PermissionResultDeny(
-                message="Write tool called without a resolvable file path.",
-                interrupt=False,
-            )
-
-        resolved = _resolve(target, project_root)
-        if not _is_within(resolved, allowed):
-            return PermissionResultDeny(
-                message=(
-                    f"Write to {resolved} denied. Writes are restricted to: "
-                    f"{', '.join(str(a) for a in allowed)}."
-                ),
-                interrupt=False,
-            )
-
-        # --- Append-only enforcement ------------------------------------
-        if resolved.name in _APPEND_ONLY:
-            return PermissionResultDeny(
-                message=(
-                    f"{resolved.name} is append-only and cannot be edited in place. "
-                    f"Append to it with bash instead, e.g.: "
-                    f"printf '%s\\n' \"<your entry>\" >> {resolved}"
-                ),
-                interrupt=False,
-            )
-
-        return PermissionResultAllow(updated_input=input_data)
+        return PermissionResultDeny(message=reason, interrupt=False)
 
     return gate
+
+
+def make_pretooluse_hook(project_root: Path, write_roots: list[str]):
+    """Build a PreToolUse hook enforcing the SAME policy as make_gate.
+
+    THIS is the enforcement path that actually fires. Per the SDK permission
+    pipeline (PreToolUse hook -> deny rules -> allow rules -> mode -> can_use_tool),
+    a bare allowedTools entry auto-approves a tool BEFORE can_use_tool is
+    consulted — but the PreToolUse hook runs FIRST, regardless of allowlist or
+    permission mode. So denials placed here cannot be shadowed.
+
+    Returns a dict shaped for ClaudeAgentOptions(hooks={"PreToolUse": [...]}).
+    A deny sets hookSpecificOutput.permissionDecision = "deny"; an allow returns
+    {} (no changes), letting the normal pipeline proceed.
+    """
+    allowed = [(project_root / r).resolve() for r in write_roots]
+
+    async def hook(input_data: dict, tool_use_id, context) -> dict:
+        tool_name = input_data.get("tool_name", "")
+        tool_input = input_data.get("tool_input", {}) or {}
+        allow, reason = _decide(tool_name, tool_input, project_root, allowed)
+        if allow:
+            return {}
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
+    return hook

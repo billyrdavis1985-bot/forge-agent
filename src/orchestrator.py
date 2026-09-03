@@ -103,10 +103,11 @@ async def run_session(instruction: str | None) -> int:
 
     # Imported here, not at module scope, so --status works without the SDK.
     try:
-        from claude_agent_sdk import query, ClaudeAgentOptions
+        from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, HookMatcher
         from claude_agent_sdk.types import ResultMessage
 
-        from .guards import make_gate
+        from .guards import make_pretooluse_hook
+        from .agent_tools import build_tools_server, APPEND_LOG_TOOL
     except ImportError as e:
         print(
             f"PREFLIGHT FAILED:\n  - Claude Agent SDK not installed ({e}).\n"
@@ -139,14 +140,23 @@ async def run_session(instruction: str | None) -> int:
     health.start()
     ledger.start_run(run_id, instruction)
 
+    tools_server = build_tools_server(mem.memory_dir)
+    allowed_tools = ["Read", "Glob", "Grep", "Write", APPEND_LOG_TOOL]
+    disallowed_tools = ["Bash", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"]
+
     options = ClaudeAgentOptions(
         model=cfg["model"],
         fallback_model=cfg.get("fallback_model"),
-        allowed_tools=cfg["allowed_tools"],
+        mcp_servers={"forge": tools_server},
+        allowed_tools=allowed_tools,
+        disallowed_tools=disallowed_tools,
         max_turns=cfg["max_turns"],
         max_budget_usd=cfg["max_budget_usd"],
         cwd=str(PROJECT_ROOT),
-        can_use_tool=make_gate(PROJECT_ROOT, cfg["write_roots"]),
+        hooks={"PreToolUse": [HookMatcher(matcher="*", hooks=[make_pretooluse_hook(PROJECT_ROOT, cfg["write_roots"])])]},
+        permission_mode="dontAsk",
+        # can_use_tool removed: it was shadowed (zero enforcement) and emitted a
+        # misleading warning. The PreToolUse hook is the real, verified gate.
         system_prompt=(
             "You are Forge Agent operating one bounded research session. "
             "Follow the mission and memory protocol given in the context."
@@ -161,13 +171,15 @@ async def run_session(instruction: str | None) -> int:
 
     try:
         with transcript_path.open("w", encoding="utf-8") as tf:
-            async for message in query(prompt=prompt_for(mem, instruction), options=options):
-                tf.write(f"{message}\n")
-                tf.flush()  # keep the transcript useful if the process is killed
-                if isinstance(message, ResultMessage):
-                    cost = getattr(message, "total_cost_usd", 0.0) or 0.0
-                    turns = getattr(message, "num_turns", None)
-                    result_text = getattr(message, "result", "") or ""
+            async with ClaudeSDKClient(options=options) as client:
+                await client.query(prompt_for(mem, instruction))
+                async for message in client.receive_response():
+                    tf.write(f"{message}\n")
+                    tf.flush()  # keep the transcript useful if the process is killed
+                    if isinstance(message, ResultMessage):
+                        cost = getattr(message, "total_cost_usd", 0.0) or 0.0
+                        turns = getattr(message, "num_turns", None)
+                        result_text = getattr(message, "result", "") or ""
     except Exception:
         err = traceback.format_exc(limit=5)
         sha = mem.commit_run(run_id)  # commit whatever partial work survived
