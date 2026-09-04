@@ -107,7 +107,7 @@ async def run_session(instruction: str | None) -> int:
         from claude_agent_sdk.types import ResultMessage
 
         from .guards import make_pretooluse_hook
-        from .agent_tools import build_tools_server, APPEND_LOG_TOOL, RUN_CRITIC_TOOL
+        from .agent_tools import build_tools_server, APPEND_LOG_TOOL, RUN_CRITIC_TOOL, RUN_CRITIC_BATCH_TOOL
     except ImportError as e:
         print(
             f"PREFLIGHT FAILED:\n  - Claude Agent SDK not installed ({e}).\n"
@@ -141,7 +141,7 @@ async def run_session(instruction: str | None) -> int:
     ledger.start_run(run_id, instruction)
 
     tools_server = build_tools_server(mem.memory_dir)
-    allowed_tools = ["Read", "Glob", "Grep", "Write", APPEND_LOG_TOOL, RUN_CRITIC_TOOL]
+    allowed_tools = ["Read", "Glob", "Grep", "Write", APPEND_LOG_TOOL, RUN_CRITIC_TOOL, RUN_CRITIC_BATCH_TOOL]
     disallowed_tools = ["Bash", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"]
 
     options = ClaudeAgentOptions(

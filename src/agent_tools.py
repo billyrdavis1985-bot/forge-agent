@@ -114,17 +114,98 @@ async def run_critic(args: dict) -> dict:
             f"--- verdict preview ---\n{preview}"}]}
 
 
+import re as _re
+
+
+def _call_ollama(model: str, prompt: str) -> tuple:
+    import json, urllib.request
+    payload = json.dumps({"model": model, "prompt": prompt, "stream": False,
+                          "options": {"seed": 42, "temperature": 0}}).encode("utf-8")
+    req = urllib.request.Request(_OLLAMA_URL, data=payload,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return data.get("response", ""), data
+
+
+_CRITIC_REPO = None
+
+
+@tool(
+    "run_critic_batch",
+    "Run every candidate in a corruption batch file through a critic model and "
+    "stage the collected verdicts ALONGSIDE each item's ground-truth label for "
+    "human review. Bounded: only whitelisted critic models, only batch files in "
+    "the critic repo eval/ directory (bare filename, no paths). Deterministic. "
+    "ASSEMBLES comparison material; does NOT score or judge — reading verdicts "
+    "against truth is the researcher's job.",
+    {"model": str, "batch_file": str},
+)
+async def run_critic_batch(args: dict) -> dict:
+    import json
+    if _MEMORY_DIR is None or _CRITIC_REPO is None:
+        return {"content": [{"type": "text", "text": "Tool not initialized."}], "is_error": True}
+    model = (args.get("model") or "").strip()
+    batch_file = (args.get("batch_file") or "").strip()
+    if model not in _ALLOWED_CRITICS:
+        return {"content": [{"type": "text", "text":
+                f"Refused: '{model}' is not an allowed critic. Allowed: {sorted(_ALLOWED_CRITICS)}."}], "is_error": True}
+    if "/" in batch_file or "\\" in batch_file or ".." in batch_file:
+        return {"content": [{"type": "text", "text": "Refused: batch_file must be a bare filename (no path)."}], "is_error": True}
+    src = (_CRITIC_REPO / "eval" / batch_file).resolve()
+    if _CRITIC_REPO / "eval" not in src.parents or not src.is_file():
+        return {"content": [{"type": "text", "text": f"Refused: {batch_file} not found in the critic repo eval/ dir."}], "is_error": True}
+    items = []
+    for line in src.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            try: items.append(json.loads(line))
+            except json.JSONDecodeError: pass
+    if not items:
+        return {"content": [{"type": "text", "text": f"No parseable items in {batch_file}."}], "is_error": True}
+    rows = []; errors = 0
+    for it in items:
+        prompt = ("Critique the following candidate reasoning. Emit your standard "
+                  "VERDICT / STEP ANALYSIS / SEVERITY format.\n\n"
+                  f"QUESTION:\n{it.get('prompt','')}\n\nCANDIDATE:\n{it.get('candidate','')}")
+        try:
+            verdict, meta = _call_ollama(model, prompt)
+        except Exception as e:
+            verdict, meta = f"<error: {e}>", {}; errors += 1
+        m = _re.search(r"VERDICT:\s*(\w+)", verdict)
+        critic_verdict = m.group(1).lower() if m else "(none)"
+        rows.append({"id": it.get("id"), "variant": it.get("variant"),
+                     "ground_truth_label": it.get("label"), "error_type": it.get("error_type"),
+                     "critic_verdict_token": critic_verdict, "critic_full_response": verdict})
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    out_dir = (_MEMORY_DIR.parent / "scratch" / "critic_runs"); out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"batch_{batch_file.replace('.jsonl','')}_{model.replace(':','_')}_{stamp}.json"
+    out_file.write_text(json.dumps({"batch_file": batch_file, "model": model,
+        "options": {"seed": 42, "temperature": 0}, "n_items": len(rows), "n_errors": errors,
+        "NOTE": "Verdicts staged next to ground truth. NOT scored — verdict-token vs label "
+                "matching is a proxy; read the full responses to judge genuine diagnosis.",
+        "rows": rows}, indent=2), encoding="utf-8")
+    return {"content": [{"type": "text", "text":
+            f"Ran {len(rows)} candidates from {batch_file} through {model} ({errors} errors). "
+            f"Verdicts staged next to ground-truth labels in scratch/critic_runs/{out_file.name}. "
+            f"This is comparison material, NOT a score — whether a matching token reflects a "
+            f"genuine diagnosis is yours to judge."}]}
+
+
 def build_tools_server(memory_dir: Path):
     """Bind the tools to this run's memory dir and return the in-process server."""
-    global _MEMORY_DIR
+    global _MEMORY_DIR, _CRITIC_REPO
     _MEMORY_DIR = memory_dir.resolve()
+    import os
+    _CRITIC_REPO = Path(os.environ.get('CRITIC_REPO', Path.home() / 'hf-critic')).resolve()
     return create_sdk_mcp_server(
         name="forge",
         version="1.0.0",
-        tools=[append_log, run_critic],
+        tools=[append_log, run_critic, run_critic_batch],
     )
 
 
 # The permission name the agent uses to call this: mcp__forge__append_log
 APPEND_LOG_TOOL = "mcp__forge__append_log"
 RUN_CRITIC_TOOL = "mcp__forge__run_critic"
+RUN_CRITIC_BATCH_TOOL = "mcp__forge__run_critic_batch"

@@ -65,3 +65,26 @@ class TestRunCriticContainment:
         from src.agent_tools import run_critic
         r = await run_critic({"model": "critic-mistral", "prompt": "  "})
         assert r.get("is_error") is True
+
+
+class TestRunCriticBatchContainment:
+    def test_batch_schema(self):
+        from src.agent_tools import run_critic_batch
+        name, desc, schema = run_critic_batch._tool_meta
+        assert set(schema.keys()) == {"model", "batch_file"}
+    def test_batch_tool_name(self):
+        from src.agent_tools import RUN_CRITIC_BATCH_TOOL
+        assert RUN_CRITIC_BATCH_TOOL == "mcp__forge__run_critic_batch"
+    @pytest.mark.asyncio
+    async def test_batch_rejects_non_critic(self, memdir):
+        from src.agent_tools import run_critic_batch, build_tools_server
+        build_tools_server(memdir)
+        r = await run_critic_batch({"model": "llama3", "batch_file": "x.jsonl"})
+        assert r.get("is_error") is True
+    @pytest.mark.asyncio
+    async def test_batch_rejects_path_traversal(self, memdir):
+        from src.agent_tools import run_critic_batch, build_tools_server
+        build_tools_server(memdir)
+        for bad in ["../secret.txt", "/etc/passwd", "sub/x.jsonl", ".."]:
+            r = await run_critic_batch({"model": "critic-mistral", "batch_file": bad})
+            assert r.get("is_error") is True, f"should reject {bad}"
