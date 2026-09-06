@@ -61,6 +61,13 @@ async def append_log(args: dict) -> dict:
 _ALLOWED_CRITICS = {"critic-mistral", "critic-mistral:latest", "critic", "critic:latest"}
 _OLLAMA_URL = "http://localhost:11434/api/generate"
 
+# DETERMINISM LOCK (verified by determinism_probe config C: byte-identical across
+# repeats). temp=0 + seed alone is NOT reproducible on GPU — num_ctx must be
+# pinned and decoding forced greedy (top_k=1). Without this, verdicts flip across
+# runs and any finding built on single samples is unstable.
+_DET_OPTIONS = {"seed": 42, "temperature": 0, "num_ctx": 8192,
+                "num_predict": 1024, "top_k": 1, "top_p": 1.0}
+
 
 @tool(
     "run_critic",
@@ -87,7 +94,7 @@ async def run_critic(args: dict) -> dict:
     if not prompt:
         return {"content": [{"type": "text", "text": "Refused: empty prompt."}], "is_error": True}
     payload = json.dumps({"model": model, "prompt": prompt, "stream": False,
-                          "options": {"seed": 42, "temperature": 0}}).encode("utf-8")
+                          "options": _DET_OPTIONS}).encode("utf-8")
     req = urllib.request.Request(_OLLAMA_URL, data=payload,
                                  headers={"Content-Type": "application/json"})
     try:
@@ -104,7 +111,7 @@ async def run_critic(args: dict) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{model.replace(':', '_')}_{stamp}.json"
     out_file.write_text(json.dumps({"model": model, "prompt": prompt,
-        "options": {"seed": 42, "temperature": 0}, "response": verdict,
+        "options": _DET_OPTIONS, "response": verdict,
         "eval_count": data.get("eval_count"), "total_duration_ns": data.get("total_duration")},
         indent=2), encoding="utf-8")
     preview = verdict[:600] + ("\u2026" if len(verdict) > 600 else "")
@@ -120,7 +127,7 @@ import re as _re
 def _call_ollama(model: str, prompt: str) -> tuple:
     import json, urllib.request
     payload = json.dumps({"model": model, "prompt": prompt, "stream": False,
-                          "options": {"seed": 42, "temperature": 0}}).encode("utf-8")
+                          "options": _DET_OPTIONS}).encode("utf-8")
     req = urllib.request.Request(_OLLAMA_URL, data=payload,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as resp:
@@ -163,6 +170,10 @@ async def run_critic_batch(args: dict) -> dict:
             except json.JSONDecodeError: pass
     if not items:
         return {"content": [{"type": "text", "text": f"No parseable items in {batch_file}."}], "is_error": True}
+    from . import provenance as _prov
+    import time as _time
+    run_id = f"critrun-{_time.strftime('%Y%m%d-%H%M%S')}"
+    prov = _prov.Provenance(_MEMORY_DIR, _CRITIC_REPO, run_id, batch_file, model, seed=42, temperature=0)
     rows = []; errors = 0
     for it in items:
         prompt = ("Critique the following candidate reasoning. Emit your standard "
@@ -174,6 +185,9 @@ async def run_critic_batch(args: dict) -> dict:
             verdict, meta = f"<error: {e}>", {}; errors += 1
         m = _re.search(r"VERDICT:\s*(\w+)", verdict)
         critic_verdict = m.group(1).lower() if m else "(none)"
+        prov.record(item_id=it.get("id"), variant=it.get("variant"), prompt=prompt,
+                    raw_response=verdict, parsed_verdict=critic_verdict,
+                    eval_count=meta.get("eval_count"), total_duration_ns=meta.get("total_duration"))
         rows.append({"id": it.get("id"), "variant": it.get("variant"),
                      "ground_truth_label": it.get("label"), "error_type": it.get("error_type"),
                      "critic_verdict_token": critic_verdict, "critic_full_response": verdict})
@@ -181,10 +195,14 @@ async def run_critic_batch(args: dict) -> dict:
     out_dir = (_MEMORY_DIR.parent / "scratch" / "critic_runs"); out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"batch_{batch_file.replace('.jsonl','')}_{model.replace(':','_')}_{stamp}.json"
     out_file.write_text(json.dumps({"batch_file": batch_file, "model": model,
-        "options": {"seed": 42, "temperature": 0}, "n_items": len(rows), "n_errors": errors,
+        "run_id": run_id, "model_digest": prov.model_digest,
+        "code_git_sha": prov.code_sha, "data_git_sha": prov.data_sha,
+        "options": _DET_OPTIONS, "n_items": len(rows), "n_errors": errors,
         "NOTE": "Verdicts staged next to ground truth. NOT scored — verdict-token vs label "
                 "matching is a proxy; read the full responses to judge genuine diagnosis.",
+        "provenance": f"memory/provenance/{run_id}_manifest.json",
         "rows": rows}, indent=2), encoding="utf-8")
+    prov.write_manifest(staged_file=f"scratch/critic_runs/{out_file.name}")
     return {"content": [{"type": "text", "text":
             f"Ran {len(rows)} candidates from {batch_file} through {model} ({errors} errors). "
             f"Verdicts staged next to ground-truth labels in scratch/critic_runs/{out_file.name}. "
