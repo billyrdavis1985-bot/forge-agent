@@ -1,83 +1,70 @@
-# Forge Agent — Phase 1
+# Forge Agent
 
-A minimal autonomous research agent with git-versioned persistent memory,
-built on the Claude Agent SDK. Phase 1 adds unattended operation: a systemd
-timer, a SQLite operations ledger with a daily budget ceiling, a dead-man's
-switch, and enforced append-only memory.
+An autonomous research agent for evaluating fine-tuned reasoning critics — built
+as a hardened, reproducible instrument, and a deliberately small precursor to a
+larger autonomous-research system.
 
-**Validate a manual run before enabling the timer** — see `deploy/RUNBOOK.md`.
-The scheduler multiplies whatever the agent does, mistakes included.
+Forge runs locally-hosted critic models against batches of deliberately-corrupted
+reasoning samples, stages each verdict against ground truth, and characterizes
+each critic's failure profile — unattended, sandboxed, and without the agent
+itself ever judging whether a verdict is genuinely correct.
 
-## What each piece does
+## What makes it notable
 
-| Path | Role |
-|------|------|
-| `config/agent.yaml` | Model routing + safety caps + tool/write allowlists — the only file you edit to retune behavior. |
-| `memory/CLAUDE.md` | Standing mission + memory protocol, loaded into every session. |
-| `memory/open_questions.md` | The task frontier. Agent picks the top item each run. |
-| `memory/research_log.md` | Append-only run journal. |
-| `memory/findings/` | One markdown file per topic. |
-| `src/orchestrator.py` | Entry point: preflight → budget gate → SDK loop under guards → git-commit → ledger → health ping. |
-| `src/ledger.py` | SQLite operations record: run history, cost, daily budget ceiling. |
-| `src/health.py` | Dead-man's switch (healthchecks.io). Fail-open: never breaks a run. |
-| `deploy/` | systemd unit + timer, env template, deployment runbook. |
-| `src/memory_manager.py` | Git plumbing + snapshot assembly. Every run is an atomic, revertible commit. |
-| `src/guards.py` | Permission gate: write containment, enforced append-only log, bash command gating. |
-| `runs/` | Full transcript per session (audit trail). |
+The engineering is built around one discipline: **make it impossible for the
+instrument to fool the researcher.**
 
-## Setup
+- **Two independent enforcement layers.** A software permission guard (removes
+  shell access, path-jails all writes) *and* an OS-level bubblewrap sandbox
+  (kernel refuses out-of-bounds writes even if the guard fails). Both verified
+  by live probe.
+- **Evidence chain.** Every critic response is captured below the agent, hashed
+  at the source, and pinned to the exact model digest and code/data git SHAs.
+  Any run is independently verifiable; tampering is detectable.
+- **Reproducibility, verified.** The instrument was found *non*-reproducible
+  under naive settings — verdicts flipped across identical runs. Diagnosed
+  (Ollama determinism needs pinned `num_ctx` + greedy decoding) and fixed;
+  runs are now byte-reproducible. Caught before any finding was trusted.
+- **Control-plane boundary.** Untrusted critic output cannot reach the agent's
+  decision context as prose — only parsed tokens cross. Prompt-injection across
+  the model boundary is closed and tested.
+- **Governance spine.** The agent stages judgments for human review; it never
+  scores or decides whether a diagnosis is genuine.
 
-Requires Python 3.10+ and the Claude Code CLI on PATH.
+## A finding it produced
 
-```bash
-pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-...        # your API key
-```
+Under byte-reproducible decoding, paired perturbation analysis of two fine-tuned
+critics showed **disjoint blind spots** (each misses corrupted items the other
+catches) and that one critic **over-flags on a majority of pairable problems** —
+it cannot distinguish a sound proof from its corrupted twin. Two problems defeat
+both critics identically (a shared, architecture-independent failure). All
+classifications are verdict-level and reproducible; whether they reflect genuine
+reasoning is left to human reading.
 
-## Run one session
+## Architecture
 
-```bash
-./run.sh                          # agent picks the top open question
-./run.sh "summarize findings"     # or give it an explicit instruction
-python -m src.orchestrator --status   # recent runs, cost, today's spend
-```
+| Component | Role |
+|---|---|
+| `src/orchestrator.py` | Preflight, budget gate, sandboxed agent loop, ledger, health |
+| `src/guards.py` | Software enforcement: write containment, tool gating |
+| `src/agent_tools.py` | Bounded tools: `run_critic`, `run_critic_batch`, `append_log` |
+| `src/provenance.py` | Evidence chain: immutable records, hashing, verification |
+| `src/verify.py` | Independent run verifier |
+| `src/ledger.py` | SQLite operations record + daily budget ceiling |
+| `src/queue.py` | Task queue for unattended drains |
+| `sandbox.sh` / `sandbox_probe.sh` | OS-level bwrap jail + its probe |
+| `drain.sh` | Unattended queue drain (resumes after sleep) |
+| `build_dashboard.py` | Audit surface: failure-shape analysis, no scoring |
+| `perturbation.py` | Paired clean-vs-corrupted discrimination analysis |
+| `adjudicate.py` | Blinded human-adjudication protocol |
+| `docs/feedback-loop-principle.md` | Guardrail for any future training loop |
 
-Exit codes: 0 ok, 1 run failed, 2 preflight failed, 3 skipped (budget reached).
+## Requirements
 
-After a run: inspect `memory/research_log.md` for the new entry, and
-`git log --oneline` for the commit. If the agent ever clobbers its notes,
-`git revert <sha>` restores them byte-for-byte.
+Linux (or WSL2). Python 3.10+, bubblewrap, Ollama, and the Claude Agent SDK. The
+agent's memory is a separate private git repo; only the machinery is published.
 
-## Safety properties
+## Status
 
-- **Write containment** — the permission gate denies any write outside the
-  configured roots, including path-traversal escapes. Reads are unrestricted.
-- **Budget kill-switch** — `max_budget_usd` aborts the run at the spend cap.
-- **Turn cap** — `max_turns` bounds the agent loop.
-- **Recoverability** — every run is a git commit; nothing the agent does is
-  unrecoverable.
-- **Concurrency guard** — `run.sh` uses `flock` so two launches can't race on
-  the same memory directory; orphaned runs are reaped on next start.
-- **Append-only log** — enforced at the gate: Write/Edit on `research_log.md`
-  is denied, and truncating `>` redirects onto it are blocked. Only `>>`.
-- **Daily budget ceiling** — spans runs, so many small sessions can't add up
-  past the cap the way a per-session limit alone would allow.
-
-## Known limitations (by design)
-
-- **No web access.** Phase 2 adds it behind a read-only subagent so fetched
-  content cannot trigger writes (prompt-injection containment).
-- **Bash gating is denylist-based.** It blocks known-destructive patterns, not
-  every conceivable one. Git recoverability is the real backstop, not the regex.
-- **No context compaction yet.** When `findings/` outgrows the window, add a
-  Haiku summarization pass (Phase 2) before reaching for a vector store.
-
-## Building in VS Code
-
-See `VSCODE.md` — setup, debug configs, and the platform note (`run.sh` needs
-Linux or WSL; use Remote-SSH if the agent runs on a separate box).
-
-## Deployment
-
-See `deploy/RUNBOOK.md` for install, systemd setup, monitoring, exit codes,
-recovery procedure, and known failure modes.
+A working, tested instrument. Not affiliated with or endorsed by any model
+vendor. Research code.
