@@ -114,11 +114,14 @@ async def run_critic(args: dict) -> dict:
         "options": _DET_OPTIONS, "response": verdict,
         "eval_count": data.get("eval_count"), "total_duration_ns": data.get("total_duration")},
         indent=2), encoding="utf-8")
-    preview = verdict[:600] + ("\u2026" if len(verdict) > 600 else "")
+    import re as _re2
+    _m = _re2.search("VERDICT:" + chr(92) + "s*(" + chr(92) + "w+)", verdict)
+    _tok = _m.group(1).lower() if _m else "(none)"
     return {"content": [{"type": "text", "text":
-            f"Critic {model} responded ({data.get('eval_count','?')} tokens). "
-            f"Full verdict staged to scratch/critic_runs/{out_file.name} for your review.\n\n"
-            f"--- verdict preview ---\n{preview}"}]}
+            f"Critic {model} responded ({data.get('eval_count','?')}) tokens). "
+            f"Parsed verdict token: {_tok}. Full raw response staged to "
+            f"scratch/critic_runs/{out_file.name} for the researcher to read. "
+            f"(Raw critic text is untrusted and kept out of the agent context.)"}]}
 
 
 import re as _re
