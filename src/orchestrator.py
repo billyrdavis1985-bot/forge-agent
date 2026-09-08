@@ -127,6 +127,12 @@ async def run_session(instruction: str | None) -> int:
 
     daily_cap = float(cfg.get("daily_budget_usd", 2.00))
     allowed, spent = ledger.budget_check(daily_cap)
+    # Make the daily ceiling literally true: this session may spend at most the
+    # SMALLER of the configured session cap and the budget remaining today.
+    # Without this, spent=$1.90 (cap $2.00) still grants a full $0.50 session,
+    # allowing a finish at $2.40 — over the "ceiling".
+    session_cap = float(cfg["max_budget_usd"])
+    effective_cap = max(0.0, min(session_cap, daily_cap - spent))
     if not allowed:
         msg = f"daily budget reached (${spent:.4f} of ${daily_cap:.2f}) — skipping run"
         print(msg)
@@ -151,7 +157,7 @@ async def run_session(instruction: str | None) -> int:
         allowed_tools=allowed_tools,
         disallowed_tools=disallowed_tools,
         max_turns=cfg["max_turns"],
-        max_budget_usd=cfg["max_budget_usd"],
+        max_budget_usd=effective_cap,
         cwd=str(PROJECT_ROOT),
         hooks={"PreToolUse": [HookMatcher(matcher="*", hooks=[make_pretooluse_hook(PROJECT_ROOT, cfg["write_roots"])])]},
         permission_mode="dontAsk",
@@ -163,7 +169,8 @@ async def run_session(instruction: str | None) -> int:
         ),
     )
 
-    print(f"[{run_id}] start (model={cfg['model']}, session cap=${cfg['max_budget_usd']}, "
+    print(f"[{run_id}] start (model={cfg['model']}, effective cap=${effective_cap:.4f} "
+          f"[session ${session_cap:.2f}, remaining today ${daily_cap - spent:.4f}], "
           f"day spent=${spent:.4f}/${daily_cap:.2f})")
 
     transcript_path = PROJECT_ROOT / "runs" / f"{run_id}.log"
