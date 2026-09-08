@@ -38,6 +38,34 @@ instrument to fool the researcher.**
 - **Governance spine.** The agent stages judgments for human review; it never
   scores or decides whether a diagnosis is genuine.
 
+ ## Quickstart
+
+Requires Linux or WSL2, Python 3.10+, [bubblewrap](https://github.com/containers/bubblewrap),
+and [Ollama](https://ollama.com) with your critic models pulled.
+
+```bash
+# 1. Install and test — no API key or SDK needed for the test suite
+python3 -m venv .venv
+.venv/bin/pip install pytest pytest-asyncio PyYAML
+.venv/bin/python -m pytest tests/ -q          # 51 tests, all offline
+
+# 2. Bootstrap the agent's memory from templates
+cp memory/CLAUDE.md.example        memory/CLAUDE.md
+cp memory/open_questions.md.example memory/open_questions.md
+cp config/agent.yaml.example        config/agent.yaml
+cp .env.example .env                           # then add your ANTHROPIC_API_KEY
+
+# 3. Prove the sandbox holds — before trusting it
+./sandbox_probe.sh                             # watch the kernel refuse out-of-bounds writes
+
+# 4. Run one bounded, sandboxed session
+.venv/bin/pip install -r requirements.txt      # the Claude Agent SDK
+./run.sh "your task"                           # routes through flock -> bwrap -> orchestrator
+```
+
+The agent's `memory/` is a separate private git repo; only the machinery is
+published here, so you supply your own mission and tasks via the templates above. 
+
 ## A finding it produced
 
 Under byte-reproducible decoding, paired perturbation analysis of two fine-tuned
@@ -66,10 +94,42 @@ reasoning is left to human reading.
 | `adjudicate.py` | Blinded human-adjudication protocol |
 | `docs/feedback-loop-principle.md` | Guardrail for any future training loop |
 
+## Verify the claims yourself
+
+This project's ethos is *don't trust, verify* — so every safety claim above is a
+runnable demonstration, not an assertion:
+
+```bash
+./sandbox_probe.sh                 # kernel refuses writes outside the sandbox
+.venv/bin/python -m pytest tests/  # 51 tests: guard policy, evidence chain,
+                                   #   control-plane boundary, budget ceiling,
+                                   #   queue, tool containment, adjudication
+.venv/bin/python -m src.verify memory   # re-hash every critic response; a run
+                                   #   is VERIFIED only if the evidence chain holds
+```
+
+The guard tests include the exact escape that once succeeded against an earlier
+version (a write reaching the real repo), now blocked and regression-tested.
+
 ## Requirements
 
 Linux (or WSL2). Python 3.10+, bubblewrap, Ollama, and the Claude Agent SDK. The
 agent's memory is a separate private git repo; only the machinery is published.
+
+## Known limitations
+
+Claims here are scoped to what the code proves. Deferred hardening, tracked
+honestly rather than overstated:
+
+- **Evidence custody.** Provenance records live in the agent's writable domain,
+  so hashing detects accidental corruption and naive tampering — not a
+  coordinated in-boundary rewrite. A custodian outside the agent's write
+  authority is future work.
+- **Information-flow channel.** The tool-return channel that could carry critic
+  prose into the agent is closed and tested; the agent still retains read access
+  to staged files, so the full channel is not yet sealed.
+- **Scale.** Findings are from a small grid (two critics). The methodology is the
+  contribution; the numbers are illustrative, not a general benchmark.
 
 ## Status
 
