@@ -16,11 +16,12 @@ itself ever judging whether a verdict is genuinely correct.
 The engineering is built around one discipline: **make it impossible for the
 instrument to fool the researcher.**
 
-- **Two enforcement layers.** A software permission guard (removes shell access,
-  path-jails all writes) *and* an OS-level bubblewrap sandbox (`sandbox.sh`,
-  kernel-enforced), both verified by live probe. NOTE: the sandbox is currently a
-  separate launcher; converging all execution paths (manual, systemd, drain)
-  through it by default is tracked as the top open engineering item.
+- **Two enforcement layers, sandboxed by default.** A software permission guard
+  (removes shell access, path-jails all writes) *and* an OS-level bubblewrap
+  sandbox (`sandbox.sh`, kernel-enforced), both verified by live probe. All
+  execution paths — manual (`run.sh`), the systemd service, and the queue drain
+  — converge through `flock -> bubblewrap -> orchestrator`, so the agent is
+  jailed by default, not only when the sandbox launcher is invoked directly.
 - **Evidence chain.** Every critic response is captured below the agent, hashed
   at the source, and pinned to the exact model digest and code/data git SHAs.
   Any run is independently verifiable; accidental corruption and naive tampering
