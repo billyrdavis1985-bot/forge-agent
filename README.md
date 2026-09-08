@@ -13,8 +13,8 @@ itself ever judging whether a verdict is genuinely correct.
 
 ## What makes it notable
 
-The engineering is built around one discipline: **make it impossible for the
-instrument to fool the researcher.**
+The engineering is built around one discipline: **make it harder for the instrument to mislead the researcher, while making
+failures observable, traceable, and auditable.**
 
 - **Two enforcement layers, sandboxed by default.** A software permission guard
   (removes shell access, path-jails all writes) *and* an OS-level bubblewrap
@@ -29,8 +29,8 @@ instrument to fool the researcher.**
   coordinated in-boundary rewrite is not yet defended against — see docs.)
 - **Reproducibility, verified.** The instrument was found *non*-reproducible
   under naive settings — verdicts flipped across identical runs. Diagnosed
-  (Ollama determinism needs pinned `num_ctx` + greedy decoding) and fixed;
-  runs are now byte-reproducible. Caught before any finding was trusted.
+  (Ollama determinism needs pinned `num_ctx` + greedy decoding) and fixed; repeated runs were byte-reproducible under the tested
+  model/Ollama/runtime configuration. Caught before any finding was trusted.
 - **Control-plane boundary.** Untrusted critic output cannot reach the agent's
   decision context as prose — only parsed tokens cross. The tool-return channel
   is closed and tested. (The agent retains read access to staged files, so the
