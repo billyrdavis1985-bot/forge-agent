@@ -34,9 +34,9 @@ def test_blind_flow_reveal_after_judgment(tmp_path, monkeypatch):
     with contextlib.redirect_stdout(buf):
         adj.adjudicate(mem, runs)
     out = buf.getvalue()
-    assert out.find("Judge the diagnosis") < out.find("reveal")
+    assert out.find("CANDIDATE REASONING") < out.find("reveal")
     saved = list((mem/"adjudications").glob("*.jsonl"))
     assert saved
     rec = json.loads(saved[0].read_text().splitlines()[0])
-    assert rec["judgment"] == {"detected":"n","mechanism":"na","invented":"n","sufficient":"n"}
-    assert rec["rubric_version"] == "1"
+    assert rec["judgment"]["detected"] == "n" and "diagnosis_sha256" in rec
+    assert rec["rubric_version"] == "2"
