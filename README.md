@@ -1,5 +1,7 @@
 # Forge Agent
 
+[![CI](https://github.com/billyrdavis1985-bot/forge-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/billyrdavis1985-bot/forge-agent/actions/workflows/ci.yml)
+
 An autonomous research agent for evaluating fine-tuned reasoning critics — built
 as a hardened, reproducible instrument, and a deliberately small precursor to a
 larger autonomous-research system.
