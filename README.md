@@ -16,20 +16,24 @@ itself ever judging whether a verdict is genuinely correct.
 The engineering is built around one discipline: **make it impossible for the
 instrument to fool the researcher.**
 
-- **Two independent enforcement layers.** A software permission guard (removes
-  shell access, path-jails all writes) *and* an OS-level bubblewrap sandbox
-  (kernel refuses out-of-bounds writes even if the guard fails). Both verified
-  by live probe.
+- **Two enforcement layers.** A software permission guard (removes shell access,
+  path-jails all writes) *and* an OS-level bubblewrap sandbox (`sandbox.sh`,
+  kernel-enforced), both verified by live probe. NOTE: the sandbox is currently a
+  separate launcher; converging all execution paths (manual, systemd, drain)
+  through it by default is tracked as the top open engineering item.
 - **Evidence chain.** Every critic response is captured below the agent, hashed
   at the source, and pinned to the exact model digest and code/data git SHAs.
-  Any run is independently verifiable; tampering is detectable.
+  Any run is independently verifiable; accidental corruption and naive tampering
+  are detectable. (Provenance records live in the agent's writable domain, so a
+  coordinated in-boundary rewrite is not yet defended against — see docs.)
 - **Reproducibility, verified.** The instrument was found *non*-reproducible
   under naive settings — verdicts flipped across identical runs. Diagnosed
   (Ollama determinism needs pinned `num_ctx` + greedy decoding) and fixed;
   runs are now byte-reproducible. Caught before any finding was trusted.
 - **Control-plane boundary.** Untrusted critic output cannot reach the agent's
-  decision context as prose — only parsed tokens cross. Prompt-injection across
-  the model boundary is closed and tested.
+  decision context as prose — only parsed tokens cross. The tool-return channel
+  is closed and tested. (The agent retains read access to staged files, so the
+  full information-flow channel is not yet closed — see docs.)
 - **Governance spine.** The agent stages judgments for human review; it never
   scores or decides whether a diagnosis is genuine.
 
