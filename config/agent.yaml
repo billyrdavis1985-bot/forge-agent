@@ -1,5 +1,7 @@
 # Forge Agent — configuration
-# Single source of truth for model routing and safety caps.
+# Runtime configuration for model routing and safety caps.
+# orchestrator.py constructs the live tool surface; this file documents
+# the intended permitted tools and supplies runtime limits.
 
 model: claude-sonnet-4-6        # main research loop. swap to opus for synthesis runs.
 fallback_model: claude-haiku-4-5-20251001   # used if the primary is unavailable
@@ -11,13 +13,15 @@ daily_budget_usd: 2.00         # per-UTC-day ceiling across ALL runs (enforced b
 
 # Tools the agent may invoke. No WebSearch/WebFetch yet — Phase 2 adds those
 # behind a read-only subagent so fetched content cannot trigger writes.
+# NOTE: the live tool surface is built in orchestrator.py, not from this list.
+# Bash and Edit are DISALLOWED (shell access removed for control-plane safety);
+# the agent gets Read/Glob/Grep + Write (path-jailed) + narrow custom tools.
+# This key is retained for older tooling that reads it.
 allowed_tools:
   - Read
   - Glob
   - Grep
-  - Edit
   - Write
-  - Bash
 
 # Directories the agent may write into. Anything outside is denied at the gate.
 write_roots:

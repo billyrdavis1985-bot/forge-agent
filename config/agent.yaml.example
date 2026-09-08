@@ -1,5 +1,7 @@
 # Forge Agent — configuration
-# Single source of truth for model routing and safety caps.
+# Runtime configuration for model routing and safety caps.
+# orchestrator.py constructs the live tool surface; this file documents
+# the intended permitted tools and supplies runtime limits.
 
 model: claude-sonnet-4-6        # main research loop. swap to opus for synthesis runs.
 fallback_model: claude-haiku-4-5-20251001   # used if the primary is unavailable

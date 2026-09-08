@@ -11,7 +11,7 @@ DRY_RUN=0
 
 command -v bwrap >/dev/null || { echo "bwrap not found"; exit 2; }
 [ -x "$PY" ] || { echo "venv python not found at $PY"; exit 2; }
-[ -f "$PROJECT_ROOT/sandbox.sh" ] || { echo "sandbox.sh missing"; exit 2; }
+[ -f "$PROJECT_ROOT/run.sh" ] || { echo "run.sh missing"; exit 2; }
 
 # Auto-load .env so the API key is present across all drained runs.
 if [ -f "$PROJECT_ROOT/.env" ]; then
@@ -41,13 +41,15 @@ while true; do
     echo "[dry-run] stopping after showing first pending task."; break
   fi
   "$PY" -m src.queue "$MEMORY_DIR" mark "$task_id" running
-  "$PROJECT_ROOT/sandbox.sh" "$instruction"
+  "$PROJECT_ROOT/run.sh" "$instruction"
   code=$?
   case $code in
     0) "$PY" -m src.queue "$MEMORY_DIR" mark "$task_id" done
        echo "task $task_id: done"; drained=$((drained+1)) ;;
     3) "$PY" -m src.queue "$MEMORY_DIR" mark "$task_id" pending
        echo "daily budget reached — stopping drain. $task_id left pending."; break ;;
+    75) "$PY" -m src.queue "$MEMORY_DIR" mark "$task_id" pending
+        echo "another Forge session holds the global execution lock — $task_id returned to pending."; break ;;
     *) "$PY" -m src.queue "$MEMORY_DIR" mark "$task_id" error
        echo "task $task_id: ERROR (exit $code). continuing to next task." ;;
   esac
