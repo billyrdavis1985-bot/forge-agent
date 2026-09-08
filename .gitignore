@@ -20,3 +20,6 @@ runs/*
 scratch/*
 !scratch/.gitkeep
 .drain.lock
+
+# allow example templates through (scrubbed, no real research data)
+!memory/*.example
